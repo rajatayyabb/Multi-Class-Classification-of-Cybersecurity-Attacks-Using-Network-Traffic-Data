@@ -2,113 +2,104 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pickle
-import os
 import json
+import os
 
-# Ensure visualization libraries are available
+# Try to import visualization libraries, handle if missing
 try:
     import matplotlib.pyplot as plt
     import seaborn as sns
 except ImportError:
-    st.error("Missing visualization libraries. Please check requirements.txt")
+    st.error("Visualization libraries missing. Please update requirements.txt")
 
-# --- CONFIGURATION ---
-st.set_page_config(page_title="Cybersecurity Attack Classifier", page_icon="🛡️", layout="wide")
+# --- CONFIG ---
+st.set_page_config(page_title="Cybersecurity Classifier", page_icon="🛡️", layout="wide")
 
-# --- ROBUST MODEL LOADING ---
+# --- MODEL LOADING ---
 @st.cache_resource
-def load_resources():
-    # Note: These strings match your uploaded filenames exactly (with the spaces)
-    files = {
+def load_all_assets():
+    # Exact filenames as they appear in your uploaded list (with spaces)
+    file_map = {
         "scaler": "scaler .pkl",
         "rf": "random_forest_model .pkl",
         "xgb": "xgboost_model .pkl",
         "lr": "logistic_regression_model .pkl",
         "target_le": "label_encoder_target .pkl",
-        "feature_le": "label_encoders.json"
+        "feat_le": "label_encoders.json"
     }
     
-    loaded = {}
+    assets = {}
     
-    # Load Scaler
+    # Load Scaler and Encoders (Required)
     try:
-        with open(files["scaler"], 'rb') as f:
-            loaded["scaler"] = pickle.load(f)
+        with open(file_map["scaler"], 'rb') as f:
+            assets["scaler"] = pickle.load(f)
+        with open(file_map["target_le"], 'rb') as f:
+            assets["target_le"] = pickle.load(f)
+        with open(file_map["feat_le"], 'r') as f:
+            assets["feat_le"] = json.load(f)
     except Exception as e:
-        st.error(f"Error loading Scaler: {e}")
+        st.error(f"Critical Error loading base assets: {e}")
         return None
 
-    # Load Models individually
+    # Load Models (If one fails, the others can still work)
     for key in ["rf", "xgb", "lr"]:
         try:
-            with open(files[key], 'rb') as f:
-                loaded[key] = pickle.load(f)
-        except Exception as e:
-            st.warning(f"Note: {key} model could not be loaded (File might be empty or version mismatch).")
-            loaded[key] = None
+            with open(file_map[key], 'rb') as f:
+                assets[key] = pickle.load(f)
+        except Exception:
+            assets[key] = None # Mark as unavailable
+            
+    return assets
 
-    # Load Encoders
-    try:
-        with open(files["target_le"], 'rb') as f:
-            loaded["target_le"] = pickle.load(f)
-        with open(files["feature_le"], 'r') as f:
-            loaded["feature_le"] = json.load(f)
-    except Exception as e:
-        st.error(f"Error loading encoders: {e}")
-        return None
-        
-    return loaded
-
-# --- UI LOGIC ---
+# --- APP UI ---
 st.title("🛡️ Cybersecurity Attack Classification")
-data_bundle = load_resources()
+data = load_all_assets()
 
-if data_bundle:
-    st.sidebar.header("Navigation")
-    model_option = st.sidebar.selectbox("Select Model", ["Random Forest", "Logistic Regression", "XGBoost"])
+if data:
+    st.sidebar.header("Model Selection")
+    choice = st.sidebar.selectbox("Choose Model", ["Random Forest", "Logistic Regression", "XGBoost"])
     
-    # Map selection to loaded models
-    model_map = {"Random Forest": "rf", "Logistic Regression": "lr", "XGBoost": "xgb"}
-    selected_model = data_bundle[model_map[model_option]]
+    # Selection mapping
+    model_key = {"Random Forest": "rf", "Logistic Regression": "lr", "XGBoost": "xgb"}[choice]
+    model = data[model_key]
 
-    if selected_model is None:
-        st.error(f"The {model_option} model is currently unavailable due to a file error.")
+    if model is None:
+        st.warning(f"The {choice} model is corrupted or missing. Try another.")
     else:
         uploaded_file = st.file_uploader("Upload Network Traffic CSV", type="csv")
         
         if uploaded_file:
             df = pd.read_csv(uploaded_file)
-            st.write("### Raw Data Preview", df.head())
+            st.write("### Data Preview", df.head())
             
-            if st.button("Run Detection"):
+            if st.button("Run Prediction"):
                 try:
-                    # Preprocessing
+                    # 1. Feature Prep
                     X = df.copy()
-                    # Remove columns not used in training (adjust list as needed)
-                    cols_to_drop = ['Attack Type', 'ID', 'Unnamed: 15']
-                    X = X.drop(columns=[c for c in cols_to_drop if c in X.columns])
+                    drop_cols = ['Attack Type', 'ID', 'Unnamed: 15']
+                    X = X.drop(columns=[c for c in drop_cols if c in X.columns])
 
-                    # Apply Feature Encoding from JSON
-                    for col, enc_data in data_bundle["feature_le"].items():
+                    # 2. Encode categorical columns using JSON data
+                    for col, enc in data["feat_le"].items():
                         if col in X.columns:
-                            mapping = {val: i for i, val in enumerate(enc_data['classes'])}
+                            mapping = {val: i for i, val in enumerate(enc['classes'])}
                             X[col] = X[col].map(mapping).fillna(-1)
 
-                    # Scale and Predict
-                    X_scaled = data_bundle["scaler"].transform(X)
-                    preds = selected_model.predict(X_scaled)
-                    labels = data_bundle["target_le"].inverse_transform(preds)
+                    # 3. Scale and Predict
+                    X_scaled = data["scaler"].transform(X)
+                    preds = model.predict(X_scaled)
+                    labels = data["target_le"].inverse_transform(preds)
                     
-                    # Display Result
+                    # 4. Show Results
                     df['Prediction'] = labels
-                    st.success(f"Classification successful using {model_option}!")
+                    st.success("Analysis Complete!")
                     st.dataframe(df[['Title', 'Prediction']] if 'Title' in df.columns else df)
                     
-                    # Visualization
                     fig, ax = plt.subplots()
                     sns.countplot(x=labels, ax=ax)
                     plt.xticks(rotation=45)
                     st.pyplot(fig)
                     
                 except Exception as e:
-                    st.error(f"An error occurred during prediction: {e}")
+                    st.error(f"Prediction Failed: {e}")
