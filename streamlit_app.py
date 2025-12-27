@@ -6,7 +6,12 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 import seaborn as sns
 import matplotlib.pyplot as plt
 import warnings
+import os
 warnings.filterwarnings('ignore')
+
+# Debug: Print current directory and files
+print("Current directory:", os.getcwd())
+print("Files in directory:", os.listdir('.'))
 
 st.set_page_config(
     page_title="Cybersecurity Attack Classifier",
