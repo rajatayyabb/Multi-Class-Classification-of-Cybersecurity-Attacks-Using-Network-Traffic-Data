@@ -56,6 +56,9 @@ def load_model(model_name):
 
 @st.cache_resource
 def load_all_models():
+    import json
+    from sklearn.preprocessing import LabelEncoder
+    
     models = {
         'Random Forest': load_model('random_forest_model.pkl'),
         'Logistic Regression': load_model('logistic_regression_model.pkl'),
@@ -63,7 +66,19 @@ def load_all_models():
     }
     scaler = load_model('scaler.pkl')
     label_encoder = load_model('label_encoder_target.pkl')
-    label_encoders = load_model('label_encoders.pkl')
+    
+    # Load label encoders from JSON
+    try:
+        with open('label_encoders.json', 'r') as f:
+            label_encoders_dict = json.load(f)
+        
+        label_encoders = {}
+        for col, data in label_encoders_dict.items():
+            le = LabelEncoder()
+            le.classes_ = np.array(data['classes'])
+            label_encoders[col] = le
+    except:
+        label_encoders = None
     
     return models, scaler, label_encoder, label_encoders
 
