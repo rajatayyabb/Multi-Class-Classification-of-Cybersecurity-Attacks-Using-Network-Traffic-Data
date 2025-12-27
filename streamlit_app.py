@@ -4,8 +4,13 @@ import numpy as np
 import pickle
 import os
 import json
-import matplotlib.pyplot as plt
-import seaborn as sns
+
+# Try-Except blocks for imports to help debug in Streamlit Cloud
+try:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+except ModuleNotFoundError:
+    st.error("Missing libraries! Please ensure 'matplotlib' and 'seaborn' are in your requirements.txt")
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Cybersecurity Attack Classifier", page_icon="🛡️", layout="wide")
@@ -14,7 +19,7 @@ st.set_page_config(page_title="Cybersecurity Attack Classifier", page_icon="🛡
 @st.cache_resource
 def load_resources():
     try:
-        # Using the EXACT filenames you uploaded (with the spaces)
+        # NOTE: Using the exact filenames from your upload (with the spaces)
         scaler = pickle.load(open('scaler .pkl', 'rb'))
         rf_model = pickle.load(open('random_forest_model .pkl', 'rb'))
         xgb_model = pickle.load(open('xgboost_model .pkl', 'rb'))
@@ -26,10 +31,11 @@ def load_resources():
             
         return scaler, rf_model, xgb_model, lr_model, target_encoder, feature_encoders
     except FileNotFoundError as e:
-        st.error(f"❌ Missing file: {e.filename}. Please ensure all .pkl and .json files are in the root folder.")
+        st.error(f"❌ File missing from GitHub: {e.filename}")
+        st.info("Ensure files like 'scaler .pkl' are uploaded to your repository.")
         return None
 
-# --- UI LOGIC ---
+# --- UI ---
 st.title("🛡️ Cybersecurity Attack Classification")
 
 res = load_resources()
@@ -45,43 +51,31 @@ if res:
     
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
-        st.write("### Data Preview", df.head())
+        st.write("### Input Data Preview", df.head())
         
-        if st.button("Run Detection"):
+        if st.button("Predict"):
             try:
-                # 1. Prepare data (Drop target/unnecessary columns)
-                # Note: We match the columns used during your training
+                # Preprocessing
                 X = df.copy()
-                if 'Attack Type' in X.columns: X = X.drop(columns=['Attack Type'])
-                if 'Unnamed: 15' in X.columns: X = X.drop(columns=['Unnamed: 15'])
+                # Drop non-feature columns if they exist
+                for col in ['Attack Type', 'Unnamed: 15', 'ID']:
+                    if col in X.columns: X = X.drop(columns=[col])
 
-                # 2. Categorical Encoding (Using the JSON encoders)
-                for col in X.columns:
-                    if col in feat_le_dict:
-                        classes = feat_le_dict[col]['classes']
-                        # Map known classes to integers, unknown to -1
-                        mapping = {label: i for i, label in enumerate(classes)}
-                        X[col] = X[col].map(mapping).fillna(-1)
-
-                # 3. Scaling
+                # Scaling
                 X_scaled = scaler.transform(X)
                 
-                # 4. Prediction
+                # Predict
                 preds = model.predict(X_scaled)
-                decoded_labels = target_le.inverse_transform(preds)
+                decoded = target_le.inverse_transform(preds)
                 
-                # 5. Display Results
-                df['Prediction'] = decoded_labels
-                st.success(f"Analysis complete using {model_name}!")
+                df['Prediction'] = decoded
+                st.success("Analysis Complete!")
+                st.dataframe(df[['Title', 'Prediction']].head(10))
                 
-                col1, col2 = st.columns([2, 1])
-                with col1:
-                    st.dataframe(df[['ID', 'Title', 'Prediction']].head(20))
-                with col2:
-                    fig, ax = plt.subplots()
-                    sns.countplot(data=df, x='Prediction', ax=ax)
-                    plt.xticks(rotation=45)
-                    st.pyplot(fig)
-                    
+                # Visualization
+                fig, ax = plt.subplots()
+                sns.countplot(data=df, x='Prediction', ax=ax)
+                plt.xticks(rotation=45)
+                st.pyplot(fig)
             except Exception as e:
-                st.error(f"Error during processing: {e}")
+                st.error(f"Prediction Error: {e}")
